@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: secureops
+namePrefix: prod-
+
+resources:
+  - ../../base
+  - hpa-pdb.yaml
+
+replicas:
+  - name: secureops-api
+    count: 3
+  - name: secureops-web
+    count: 3
+
+patches:
+  - target:
+      kind: Deployment
+      name: secureops-api
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "1000m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "1Gi"

@@ -1,0 +1,27 @@
+# SecureOps Checkov IaC Security Scanner Configuration
+# Documentation: https://www.checkov.io/2.Basics/Reviewing%20Scan%20Results.html
+
+framework:
+  - terraform
+  - kubernetes
+  - dockerfile
+
+compact: true
+quiet: true
+
+# Fail on CRITICAL or HIGH severity findings
+hard-fail-on:
+  - CRITICAL
+  - HIGH
+
+skip-path:
+  - tests/
+  - frontend/node_modules/
+  - frontend/dist/
+  - bin/
+  - obj/
+  - .git/
+
+output:
+  - cli
+  - json

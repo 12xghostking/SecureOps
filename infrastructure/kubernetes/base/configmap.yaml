@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: secureops-config
+  namespace: secureops
+data:
+  ASPNETCORE_ENVIRONMENT: "Production"
+  DatabaseProvider: "PostgreSQL"
+  CorsOrigins__0: "https://secureops.internal"
+  OTEL_SERVICE_NAME: "SecureOps.Api"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: secureops-secrets
+  namespace: secureops
+type: Opaque
+stringData:
+  # In production, injected via HashiCorp Vault / External Secrets Operator
+  ConnectionStrings__DefaultConnection: "Host=secureops-postgres;Port=5432;Database=secureops;Username=postgres;Password=postgres"

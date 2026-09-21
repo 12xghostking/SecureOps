@@ -1,0 +1,52 @@
+title = "SecureOps Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlists for testing fixtures and documentation"
+paths = [
+    '''tests/.*''',
+    '''docs/.*''',
+    '''node_modules/.*''',
+    '''bin/.*''',
+    '''obj/.*''',
+    '''\.git/.*''',
+    '''frontend/dist/.*'''
+]
+regexes = [
+    '''example-dummy-key-[a-zA-Z0-9]+''',
+    '''00000000-0000-0000-0000-000000000000''',
+    '''11111111-1111-1111-1111-111111111111''',
+    '''aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa''',
+    '''bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb''',
+    '''cccccccc-cccc-cccc-cccc-cccccccccccc''',
+    '''dddddddd-dddd-dddd-dddd-dddddddddddd'''
+]
+
+[[rules]]
+id = "secureops-jwt-secret"
+description = "Potential hardcoded JWT signing secret or symmetric key"
+regex = '''(?i)(jwt_secret|jwt_key|token_secret|signing_key)\s*[:=]\s*["'][A-Za-z0-9_\-+=/]{16,}["']'''
+secretGroup = 0
+keywords = ["jwt_secret", "jwt_key", "token_secret", "signing_key"]
+entropy = 3.5
+tags = ["security", "jwt", "tokens"]
+
+[[rules]]
+id = "secureops-database-connection-string"
+description = "Hardcoded database connection string containing plaintext credentials"
+regex = '''(?i)(Server|Host)=[a-zA-Z0-9\.\-]+;.*(User Id|Username|Uid)=[a-zA-Z0-9_\-]+;.*(Password|Pwd)=[^;'"\s]+'''
+secretGroup = 0
+keywords = ["Password=", "Pwd=", "Database="]
+entropy = 3.0
+tags = ["security", "database", "credentials"]
+
+[[rules]]
+id = "secureops-internal-api-key"
+description = "SecureOps Platform Internal Service-to-Service Token"
+regex = '''(?i)secops_[a-z0-9]{32,64}'''
+secretGroup = 0
+keywords = ["secops_"]
+entropy = 3.8
+tags = ["security", "service-token"]

@@ -1,0 +1,79 @@
+rules:
+  - id: csharp-ef-raw-sql-concatenation
+    message: >-
+      Detected raw SQL execution using string concatenation or unescaped interpolation.
+      Use parameterized queries or 'FromSqlInterpolated' to prevent SQL Injection (CWE-89).
+    severity: ERROR
+    languages: [csharp]
+    patterns:
+      - pattern-either:
+          - pattern: $CTX.FromSqlRaw($QUERY + $VAR, ...)
+          - pattern: $CTX.ExecuteSqlRaw($QUERY + $VAR, ...)
+          - pattern: $CTX.ExecuteSqlRawAsync($QUERY + $VAR, ...)
+          - pattern: $CTX.FromSqlRaw($"...{$VAR}...", ...)
+          - pattern: $CTX.ExecuteSqlRaw($"...{$VAR}...", ...)
+    metadata:
+      cwe: "CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"
+      owasp: "A03:2021 - Injection"
+      category: security
+      confidence: HIGH
+
+  - id: csharp-weak-crypto-hash
+    message: >-
+      Detected use of cryptographically broken or weak hashing algorithm (MD5/SHA1).
+      Use SHA256, SHA384, SHA512, or a dedicated key derivation function like Argon2id or PBKDF2.
+    severity: WARNING
+    languages: [csharp]
+    patterns:
+      - pattern-either:
+          - pattern: MD5.Create(...)
+          - pattern: SHA1.Create(...)
+          - pattern: new MD5CryptoServiceProvider(...)
+          - pattern: new SHA1CryptoServiceProvider(...)
+    metadata:
+      cwe: "CWE-327: Use of a Broken or Risky Cryptographic Algorithm"
+      owasp: "A02:2021 - Cryptographic Failures"
+      category: security
+      confidence: HIGH
+
+  - id: csharp-insecure-binary-formatter
+    message: >-
+      BinaryFormatter is inherently dangerous and cannot be made secure against remote code execution.
+      Use System.Text.Json, Protobuf, or MessagePack instead.
+    severity: ERROR
+    languages: [csharp]
+    patterns:
+      - pattern: new BinaryFormatter(...)
+    metadata:
+      cwe: "CWE-502: Deserialization of Untrusted Data"
+      owasp: "A08:2021 - Software and Data Integrity Failures"
+      category: security
+      confidence: HIGH
+
+  - id: ts-react-dangerously-set-inner-html
+    message: >-
+      Detected 'dangerouslySetInnerHTML' usage which can lead to Cross-Site Scripting (XSS).
+      Ensure input is sanitized with DOMPurify or avoid raw HTML injection.
+    severity: ERROR
+    languages: [typescript, javascript]
+    patterns:
+      - pattern: '<$TAG ... dangerouslySetInnerHTML={{ __html: $VAL }} />'
+    metadata:
+      cwe: "CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"
+      owasp: "A03:2021 - Injection"
+      category: security
+      confidence: MEDIUM
+
+  - id: csharp-hardcoded-credentials-jwt
+    message: >-
+      Detected potentially hardcoded symmetric key or secret in configuration or constant.
+      Externalize secret values to Azure Key Vault, AWS Secrets Manager, or HashiCorp Vault.
+    severity: ERROR
+    languages: [csharp]
+    patterns:
+      - pattern: new SymmetricSecurityKey(Encoding.$ENC.GetBytes("..."))
+    metadata:
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+      category: security
+      confidence: HIGH

@@ -35,3 +35,18 @@ docker-compose.override.yml
 TestResults/
 coverage/
 *.cobertura.xml
+
+# Terraform local state and provider cache
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+

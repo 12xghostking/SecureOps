@@ -1,0 +1,32 @@
+# SecureOps Trivy Scanner Configuration
+# Documentation: https://aquasecurity.github.io/trivy/latest/docs/references/configuration/config-file/
+
+format: table
+severity:
+  - CRITICAL
+  - HIGH
+  - MEDIUM
+
+exit-code: 0 # Exit code 1 enforced at gate for CRITICAL in production
+
+scan:
+  scanners:
+    - vuln
+    - misconfig
+    - secret
+  skip-dirs:
+    - tests
+    - obj
+    - bin
+    - node_modules
+    - frontend/dist
+    - .git
+
+vulnerability:
+  ignore-unfixed: true
+
+misconfiguration:
+  scanners:
+    - dockerfile
+    - terraform
+    - kubernetes

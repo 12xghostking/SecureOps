@@ -1,0 +1,111 @@
+name: DevSecOps Security Scanning
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 2 * * 1' # Every Monday at 02:00 UTC
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  secret-detection:
+    name: Gitleaks Secret Detection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  sast-semgrep:
+    name: Semgrep Static Code Analysis
+    runs-on: ubuntu-latest
+    container:
+      image: returntocorp/semgrep:latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep SAST
+        run: >
+          semgrep scan
+          --config security/semgrep/semgrep-rules.yml
+          --sarif
+          --output semgrep-results.sarif
+          src frontend/src
+
+      - name: Upload Semgrep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep-results.sarif
+        continue-on-error: true
+
+  sca-and-container-trivy:
+    name: Trivy Vulnerability & Container Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          config: 'security/trivy/trivy.yaml'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+        continue-on-error: true
+
+  iac-checkov:
+    name: Checkov Infrastructure-as-Code Security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run Checkov Scanner
+        uses: bridgecrewio/checkov-action@master
+        with:
+          config_file: security/checkov/.checkov.yml
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+          framework: terraform,kubernetes,dockerfile
+
+      - name: Upload Checkov SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov-results.sarif
+        continue-on-error: true
+
+  security-gate-enforcement:
+    name: Enforce Production Security Gate
+    needs: [secret-detection, sast-semgrep, sca-and-container-trivy, iac-checkov]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run Security Gate Verification
+        run: |
+          chmod +x scripts/security-gate.sh
+          ./scripts/security-gate.sh Production

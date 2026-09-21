@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secureops-api
+  namespace: secureops
+  labels:
+    app: secureops-api
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: secureops-api
+  template:
+    metadata:
+      labels:
+        app: secureops-api
+        tier: backend
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/organization/secureops-api:1.0.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: secureops-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 5000
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          volumeMounts:
+            - name: tmp-volume
+              mountPath: /tmp
+            - name: secret-volume
+              mountPath: /etc/secrets
+              readOnly: true
+      volumes:
+        - name: tmp-volume
+          emptyDir: {}
+        - name: secret-volume
+          secret:
+            secretName: secureops-secrets
