@@ -98,7 +98,9 @@ using (var scope = app.Services.CreateScope())
             logger.LogInformation("Ensuring database is created and up to date...");
             await context.Database.EnsureCreatedAsync();
         }
-        await DbSeeder.SeedAsync(context, logger);
+        var seedDemo = app.Environment.EnvironmentName == "Testing" ||
+                       builder.Configuration.GetValue<bool>("SeedDemoData", false);
+        await DbSeeder.SeedAsync(context, logger, seedDemo);
     }
     catch (Exception ex)
     {

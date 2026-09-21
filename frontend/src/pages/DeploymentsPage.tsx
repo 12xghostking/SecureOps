@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import type { Deployment, Application, Environment, CreateDeploymentRequest } from '../types';
 import { api } from '../services/api';
 import { StatusBadge } from '../components/Badges';
-import { Rocket, RotateCcw, Plus, X } from 'lucide-react';
+import { Rocket, RotateCcw, Plus, X, Search, ChevronLeft, ChevronRight, AlertCircle, ArrowUpDown } from 'lucide-react';
 
 export const DeploymentsPage: React.FC = () => {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
@@ -10,6 +10,19 @@ export const DeploymentsPage: React.FC = () => {
   const [envs, setEnvs] = useState<Environment[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+
+  // Search & Filter State
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedApp, setSelectedApp] = useState<string>('ALL');
+  const [selectedEnv, setSelectedEnv] = useState<string>('ALL');
+  const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
+
+  // Sorting & Pagination
+  const [sortBy, setSortBy] = useState<'newest' | 'app' | 'env' | 'status'>('newest');
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
+
   const [form, setForm] = useState<CreateDeploymentRequest>({
     applicationId: '',
     environmentId: '',
@@ -24,8 +37,8 @@ export const DeploymentsPage: React.FC = () => {
       setLoading(true);
       const [depData, appData, envData] = await Promise.all([
         api.getDeployments(),
-        api.getApplications(),
-        api.getEnvironments(),
+        api.getApplications().catch(() => [] as Application[]),
+        api.getEnvironments().catch(() => [] as Environment[]),
       ]);
       setDeployments(depData);
       setApps(appData);
@@ -47,6 +60,10 @@ export const DeploymentsPage: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedApp, selectedEnv, selectedStatus, pageSize]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,6 +93,85 @@ export const DeploymentsPage: React.FC = () => {
     }
   };
 
+  const resetFilters = () => {
+    setSearchQuery('');
+    setSelectedApp('ALL');
+    setSelectedEnv('ALL');
+    setSelectedStatus('ALL');
+    setSortBy('newest');
+    setSortOrder('desc');
+    setCurrentPage(1);
+  };
+
+  const hasActiveFilters =
+    searchQuery.trim() !== '' ||
+    selectedApp !== 'ALL' ||
+    selectedEnv !== 'ALL' ||
+    selectedStatus !== 'ALL';
+
+  // Derived filtered & sorted deployments
+  const filteredAndSortedDeployments = useMemo(() => {
+    let list = deployments.filter((d) => {
+      if (selectedApp !== 'ALL' && d.applicationName?.toLowerCase() !== selectedApp.toLowerCase()) return false;
+      if (selectedEnv !== 'ALL' && d.environmentName?.toLowerCase() !== selectedEnv.toLowerCase()) return false;
+      if (selectedStatus !== 'ALL' && d.status?.toLowerCase() !== selectedStatus.toLowerCase()) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchesApp = d.applicationName?.toLowerCase().includes(q);
+        const matchesEnv = d.environmentName?.toLowerCase().includes(q);
+        const matchesVer = d.version?.toLowerCase().includes(q);
+        const matchesCommit = d.commitSha?.toLowerCase().includes(q);
+        const matchesTrigger = d.triggeredBy?.toLowerCase().includes(q);
+        const matchesStatus = d.statusMessage?.toLowerCase().includes(q);
+        if (!matchesApp && !matchesEnv && !matchesVer && !matchesCommit && !matchesTrigger && !matchesStatus) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    list = [...list].sort((a, b) => {
+      let comparison = 0;
+      if (sortBy === 'newest') {
+        comparison = (a.id || '').localeCompare(b.id || '');
+      } else if (sortBy === 'app') {
+        comparison = (a.applicationName || '').localeCompare(b.applicationName || '');
+      } else if (sortBy === 'env') {
+        comparison = (a.environmentName || '').localeCompare(b.environmentName || '');
+      } else if (sortBy === 'status') {
+        comparison = (a.status || '').localeCompare(b.status || '');
+      }
+      return sortOrder === 'desc' ? -comparison : comparison;
+    });
+
+    return list;
+  }, [deployments, searchQuery, selectedApp, selectedEnv, selectedStatus, sortBy, sortOrder]);
+
+  const totalItems = filteredAndSortedDeployments.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const validCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (validCurrentPage - 1) * pageSize;
+  const paginatedDeployments = filteredAndSortedDeployments.slice(startIndex, startIndex + pageSize);
+
+  // App & Env options for filter dropdowns
+  const appFilterOptions = useMemo(() => {
+    const set = new Set<string>();
+    apps.forEach((a) => set.add(a.name));
+    deployments.forEach((d) => {
+      if (d.applicationName) set.add(d.applicationName);
+    });
+    return Array.from(set).sort();
+  }, [apps, deployments]);
+
+  const envFilterOptions = useMemo(() => {
+    const set = new Set<string>();
+    envs.forEach((e) => set.add(e.name));
+    deployments.forEach((d) => {
+      if (d.environmentName) set.add(d.environmentName);
+    });
+    return Array.from(set).sort();
+  }, [envs, deployments]);
+
   return (
     <div className="page-body">
       <div className="page-header">
@@ -88,10 +184,152 @@ export const DeploymentsPage: React.FC = () => {
         </button>
       </div>
 
+      {/* Filter & Search Toolbar */}
+      <div className="card filter-toolbar" style={{ marginBottom: '1.25rem' }}>
+        {/* Search Input */}
+        <div className="search-input-group">
+          <Search size={15} className="search-icon" />
+          <input
+            type="text"
+            placeholder="Search by app, env, version, commit, user..."
+            className="form-input"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button className="clear-btn" onClick={() => setSearchQuery('')} title="Clear search">
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        {/* Dropdown Filters */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {/* Application Filter */}
+          <select
+            className="form-select"
+            style={{ width: 'auto', minWidth: '130px', padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+            value={selectedApp}
+            onChange={(e) => setSelectedApp(e.target.value)}
+          >
+            <option value="ALL">All Applications</option>
+            {appFilterOptions.map((app) => (
+              <option key={app} value={app}>
+                {app}
+              </option>
+            ))}
+          </select>
+
+          {/* Environment Filter */}
+          <select
+            className="form-select"
+            style={{ width: 'auto', minWidth: '130px', padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+            value={selectedEnv}
+            onChange={(e) => setSelectedEnv(e.target.value)}
+          >
+            <option value="ALL">All Environments</option>
+            {envFilterOptions.map((env) => (
+              <option key={env} value={env}>
+                {env}
+              </option>
+            ))}
+          </select>
+
+          {/* Status Filter */}
+          <select
+            className="form-select"
+            style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+            value={selectedStatus}
+            onChange={(e) => setSelectedStatus(e.target.value)}
+          >
+            <option value="ALL">All Statuses</option>
+            <option value="Succeeded">Succeeded</option>
+            <option value="Failed">Failed</option>
+            <option value="InProgress">In Progress</option>
+            <option value="RolledBack">Rolled Back</option>
+          </select>
+
+          {/* Sort By */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+              <ArrowUpDown size={12} />
+            </span>
+            <select
+              className="form-select"
+              style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+            >
+              <option value="newest">Recent</option>
+              <option value="app">Application</option>
+              <option value="env">Environment</option>
+              <option value="status">Status</option>
+            </select>
+
+            <button
+              className="btn btn-secondary"
+              onClick={() => setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
+              style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
+              title={`Toggle sort order (Current: ${sortOrder.toUpperCase()})`}
+            >
+              {sortOrder.toUpperCase()}
+            </button>
+          </div>
+
+          {/* Page Size */}
+          <select
+            className="form-select"
+            style={{ width: 'auto', padding: '0.35rem 0.5rem', fontSize: '0.75rem' }}
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            title="Deployments per page"
+          >
+            <option value={10}>10 / page</option>
+            <option value={20}>20 / page</option>
+            <option value={50}>50 / page</option>
+          </select>
+
+          {/* Reset Filters */}
+          {hasActiveFilters && (
+            <button
+              onClick={resetFilters}
+              className="btn btn-secondary"
+              style={{ padding: '0.25rem 0.65rem', fontSize: '0.75rem', color: '#ff8800' }}
+              title="Reset all filters"
+            >
+              <RotateCcw size={13} /> Reset
+            </button>
+          )}
+        </div>
+      </div>
+
       {loading ? (
-        <div style={{ color: 'var(--text-muted)' }}>Loading deployment history...</div>
+        <div className="card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+          Loading deployment history...
+        </div>
+      ) : totalItems === 0 ? (
+        <div className="card empty-state">
+          <AlertCircle className="empty-state-icon" />
+          <div className="empty-state-title">
+            {hasActiveFilters ? 'No Matching Deployments' : 'No Deployments Recorded Yet'}
+          </div>
+          <p className="empty-state-desc">
+            {hasActiveFilters
+              ? 'No deployments match your active search and filter criteria.'
+              : 'Trigger your first deployment using the button above or run your CI/CD pipeline with the security gate.'}
+          </p>
+          {hasActiveFilters ? (
+            <button onClick={resetFilters} className="btn btn-primary" style={{ marginTop: '0.5rem' }}>
+              <RotateCcw size={14} /> Clear All Filters
+            </button>
+          ) : (
+            <button onClick={() => setShowModal(true)} className="btn btn-primary" style={{ marginTop: '0.5rem' }}>
+              <Plus size={15} /> Trigger Deployment
+            </button>
+          )}
+        </div>
       ) : (
-        <div className="card">
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="table-container" style={{ marginTop: 0 }}>
             <table>
               <thead>
@@ -103,11 +341,11 @@ export const DeploymentsPage: React.FC = () => {
                   <th>Triggered By</th>
                   <th>Status</th>
                   <th>Status Message</th>
-                  <th>Actions</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {deployments.map((d) => (
+                {paginatedDeployments.map((d) => (
                   <tr key={d.id}>
                     <td>
                       <strong style={{ color: 'var(--text-primary)' }}>{d.applicationName}</strong>
@@ -134,7 +372,7 @@ export const DeploymentsPage: React.FC = () => {
                         {d.statusMessage || 'Healthy'}
                       </span>
                     </td>
-                    <td>
+                    <td style={{ textAlign: 'right' }}>
                       {d.status === 'Succeeded' && (
                         <button
                           onClick={() => handleRollback(d)}
@@ -150,6 +388,37 @@ export const DeploymentsPage: React.FC = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Pagination Bar */}
+          <div className="pagination-bar">
+            <div>
+              Showing <strong style={{ color: 'var(--text-primary)' }}>{startIndex + 1}</strong> to{' '}
+              <strong style={{ color: 'var(--text-primary)' }}>{Math.min(startIndex + pageSize, totalItems)}</strong> of{' '}
+              <strong style={{ color: 'var(--text-primary)' }}>{totalItems}</strong> deployments
+            </div>
+
+            <div className="pagination-nav">
+              <button
+                className="pagination-btn"
+                disabled={validCurrentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft size={14} /> Prev
+              </button>
+
+              <span style={{ padding: '0 0.5rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                Page {validCurrentPage} of {totalPages}
+              </span>
+
+              <button
+                className="pagination-btn"
+                disabled={validCurrentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Next <ChevronRight size={14} />
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -180,9 +449,13 @@ export const DeploymentsPage: React.FC = () => {
                     value={form.applicationId}
                     onChange={(e) => setForm({ ...form, applicationId: e.target.value })}
                   >
-                    {apps.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name}</option>
-                    ))}
+                    {apps.length === 0 ? (
+                      <option value="">No registered applications</option>
+                    ) : (
+                      apps.map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))
+                    )}
                   </select>
                 </div>
 
@@ -193,9 +466,13 @@ export const DeploymentsPage: React.FC = () => {
                     value={form.environmentId}
                     onChange={(e) => setForm({ ...form, environmentId: e.target.value })}
                   >
-                    {envs.map((env) => (
-                      <option key={env.id} value={env.id}>{env.name} ({env.type})</option>
-                    ))}
+                    {envs.length === 0 ? (
+                      <option value="">No environments available</option>
+                    ) : (
+                      envs.map((env) => (
+                        <option key={env.id} value={env.id}>{env.name} ({env.type})</option>
+                      ))
+                    )}
                   </select>
                 </div>
 
@@ -241,7 +518,7 @@ export const DeploymentsPage: React.FC = () => {
                 <button type="button" onClick={() => setShowModal(false)} className="btn btn-secondary">
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
+                <button type="submit" className="btn btn-primary" disabled={apps.length === 0 || envs.length === 0}>
                   <Rocket size={15} /> Execute Deployment
                 </button>
               </div>

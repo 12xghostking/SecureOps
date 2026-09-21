@@ -8,17 +8,8 @@ namespace SecureOps.Infrastructure.Data;
 
 public static class DbSeeder
 {
-    public static async Task SeedAsync(ApplicationDbContext context, ILogger logger)
+    public static async Task SeedAsync(ApplicationDbContext context, ILogger logger, bool seedDemoApplications = false)
     {
-        if (await context.Applications.AnyAsync())
-        {
-            logger.LogInformation("Database already contains seed data. Skipping seeding.");
-            return;
-        }
-
-        logger.LogInformation("Seeding initial DevSecOps reference data...");
-
-        // 1. Seed Environments
         var envDev = new EnvironmentEntity
         {
             Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
@@ -52,7 +43,27 @@ public static class DbSeeder
             HealthStatus = "Healthy"
         };
 
-        await context.Environments.AddRangeAsync(envDev, envStaging, envProd);
+        // 1. Seed Environments if missing
+        if (!await context.Environments.AnyAsync())
+        {
+            logger.LogInformation("Seeding core environments (Development, Staging, Production)...");
+            await context.Environments.AddRangeAsync(envDev, envStaging, envProd);
+            await context.SaveChangesAsync();
+        }
+
+        if (!seedDemoApplications)
+        {
+            logger.LogInformation("Clean database mode enabled: Demo applications, findings, and deployments are omitted.");
+            return;
+        }
+
+        if (await context.Applications.AnyAsync())
+        {
+            logger.LogInformation("Database already contains seed data. Skipping demo seeding.");
+            return;
+        }
+
+        logger.LogInformation("Seeding initial DevSecOps demo data for testing...");
 
         // 2. Seed Applications
         var appAuth = new ApplicationEntity

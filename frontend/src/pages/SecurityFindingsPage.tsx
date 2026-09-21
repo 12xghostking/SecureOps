@@ -1,18 +1,28 @@
-import React, { useEffect, useState } from 'react';
-import type { SecurityFinding, SecuritySummary, TriageFindingRequest, FindingStatus } from '../types';
+import React, { useEffect, useState, useMemo } from 'react';
+import type { SecurityFinding, SecuritySummary, TriageFindingRequest, FindingStatus, Application } from '../types';
 import { api } from '../services/api';
 import { SeverityBadge } from '../components/Badges';
-import { ShieldCheck, Filter, X } from 'lucide-react';
+import { ShieldCheck, Filter, X, Search, RotateCcw, ChevronLeft, ChevronRight, AlertCircle, ArrowUpDown } from 'lucide-react';
 
 export const SecurityFindingsPage: React.FC = () => {
   const [findings, setFindings] = useState<SecurityFinding[]>([]);
   const [summary, setSummary] = useState<SecuritySummary | null>(null);
+  const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Filters
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedTool, setSelectedTool] = useState<string>('ALL');
   const [selectedSeverity, setSelectedSeverity] = useState<string>('ALL');
   const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
+  const [selectedApp, setSelectedApp] = useState<string>('ALL');
+  const [fixOnly, setFixOnly] = useState<boolean>(false);
+
+  // Sorting & Pagination
+  const [sortBy, setSortBy] = useState<'severity' | 'newest' | 'app' | 'tool'>('severity');
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(15);
 
   // Triage modal
   const [triagingFinding, setTriagingFinding] = useState<SecurityFinding | null>(null);
@@ -25,15 +35,17 @@ export const SecurityFindingsPage: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [fData, sData] = await Promise.all([
+      const [fData, sData, appData] = await Promise.all([
         api.getSecurityFindings(
           selectedSeverity !== 'ALL' ? selectedSeverity : undefined,
           selectedStatus !== 'ALL' ? selectedStatus : undefined
         ),
         api.getSecuritySummary(),
+        api.getApplications().catch(() => [] as Application[]),
       ]);
       setFindings(fData);
       setSummary(sData);
+      setApps(appData);
     } catch (err) {
       console.error(err);
     } finally {
@@ -44,6 +56,10 @@ export const SecurityFindingsPage: React.FC = () => {
   useEffect(() => {
     loadData();
   }, [selectedSeverity, selectedStatus]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedTool, selectedSeverity, selectedStatus, selectedApp, searchQuery, fixOnly, pageSize]);
 
   const handleTriageSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,10 +78,88 @@ export const SecurityFindingsPage: React.FC = () => {
     }
   };
 
-  const filteredFindings = findings.filter((f) => {
-    if (selectedTool !== 'ALL' && f.tool.toLowerCase() !== selectedTool.toLowerCase()) return false;
-    return true;
-  });
+  const resetFilters = () => {
+    setSelectedTool('ALL');
+    setSelectedSeverity('ALL');
+    setSelectedStatus('ALL');
+    setSelectedApp('ALL');
+    setSearchQuery('');
+    setFixOnly(false);
+    setSortBy('severity');
+    setSortOrder('desc');
+    setCurrentPage(1);
+  };
+
+  const hasActiveFilters =
+    selectedTool !== 'ALL' ||
+    selectedSeverity !== 'ALL' ||
+    selectedStatus !== 'ALL' ||
+    selectedApp !== 'ALL' ||
+    searchQuery.trim() !== '' ||
+    fixOnly;
+
+  const filteredAndSortedFindings = useMemo(() => {
+    let result = findings.filter((f) => {
+      if (selectedTool !== 'ALL' && f.tool.toLowerCase() !== selectedTool.toLowerCase()) return false;
+      if (selectedApp !== 'ALL' && f.applicationName?.toLowerCase() !== selectedApp.toLowerCase()) return false;
+      if (fixOnly && !f.cveId) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchesTitle = f.title?.toLowerCase().includes(q);
+        const matchesDesc = f.description?.toLowerCase().includes(q);
+        const matchesFile = f.filePath?.toLowerCase().includes(q);
+        const matchesRule = f.ruleId?.toLowerCase().includes(q);
+        const matchesCve = f.cveId?.toLowerCase().includes(q);
+        const matchesApp = f.applicationName?.toLowerCase().includes(q);
+        if (!matchesTitle && !matchesDesc && !matchesFile && !matchesRule && !matchesCve && !matchesApp) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    const severityRanks: Record<string, number> = {
+      Critical: 4,
+      High: 3,
+      Medium: 2,
+      Low: 1,
+      Info: 0,
+    };
+
+    result = [...result].sort((a, b) => {
+      let comparison = 0;
+      if (sortBy === 'severity') {
+        const rankA = severityRanks[a.severity] ?? 0;
+        const rankB = severityRanks[b.severity] ?? 0;
+        comparison = rankA - rankB;
+      } else if (sortBy === 'app') {
+        comparison = (a.applicationName || '').localeCompare(b.applicationName || '');
+      } else if (sortBy === 'tool') {
+        comparison = (a.tool || '').localeCompare(b.tool || '');
+      } else if (sortBy === 'newest') {
+        comparison = (a.id || '').localeCompare(b.id || '');
+      }
+      return sortOrder === 'desc' ? -comparison : comparison;
+    });
+
+    return result;
+  }, [findings, selectedTool, selectedApp, fixOnly, searchQuery, sortBy, sortOrder]);
+
+  const totalItems = filteredAndSortedFindings.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const validCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (validCurrentPage - 1) * pageSize;
+  const paginatedFindings = filteredAndSortedFindings.slice(startIndex, startIndex + pageSize);
+
+  // App options: combine apps from API and unique names from findings
+  const appOptions = useMemo(() => {
+    const set = new Set<string>();
+    apps.forEach((a) => set.add(a.name));
+    findings.forEach((f) => {
+      if (f.applicationName) set.add(f.applicationName);
+    });
+    return Array.from(set).sort();
+  }, [apps, findings]);
 
   return (
     <div className="page-body">
@@ -106,77 +200,219 @@ export const SecurityFindingsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Filter Bar */}
-      <div className="card" style={{ marginBottom: '1.25rem', padding: '0.85rem 1.25rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.775rem', fontWeight: 700, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <Filter size={14} /> SCANNER:
-          </span>
-          {['ALL', 'Semgrep', 'Gitleaks', 'Trivy', 'Checkov'].map((t) => (
+      {/* Primary Toolbar: Search & Scanner Buttons */}
+      <div className="card filter-toolbar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '1rem' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', justifyContent: 'space-between' }}>
+          {/* Search Input */}
+          <div className="search-input-group">
+            <Search size={15} className="search-icon" />
+            <input
+              type="text"
+              placeholder="Search findings by CVE, title, rule, path, app..."
+              className="form-input"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button className="clear-btn" onClick={() => setSearchQuery('')} title="Clear search">
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* Scanner Buttons */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.3rem', marginRight: '0.25rem' }}>
+              <Filter size={13} /> SCANNER:
+            </span>
+            {['ALL', 'Semgrep', 'Gitleaks', 'Trivy', 'Checkov'].map((t) => (
+              <button
+                key={t}
+                onClick={() => setSelectedTool(t)}
+                className="btn btn-secondary"
+                style={{
+                  padding: '0.25rem 0.6rem',
+                  fontSize: '0.75rem',
+                  background: selectedTool === t ? 'rgba(0, 242, 254, 0.15)' : 'transparent',
+                  borderColor: selectedTool === t ? 'var(--accent-cyan)' : 'var(--border-subtle)',
+                  color: selectedTool === t ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+                }}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+
+          {/* Reset Filters */}
+          {hasActiveFilters && (
             <button
-              key={t}
-              onClick={() => setSelectedTool(t)}
+              onClick={resetFilters}
               className="btn btn-secondary"
-              style={{
-                padding: '0.25rem 0.65rem',
-                fontSize: '0.75rem',
-                background: selectedTool === t ? 'rgba(0, 242, 254, 0.15)' : 'transparent',
-                borderColor: selectedTool === t ? 'var(--accent-cyan)' : 'var(--border-subtle)',
-                color: selectedTool === t ? 'var(--accent-cyan)' : 'var(--text-secondary)'
-              }}
+              style={{ padding: '0.25rem 0.65rem', fontSize: '0.75rem', color: '#ff8800' }}
+              title="Reset all filters to default"
             >
-              {t}
+              <RotateCcw size={13} /> Reset Filters
             </button>
-          ))}
+          )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <select
-            className="form-select"
-            style={{ width: 'auto', padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
-            value={selectedSeverity}
-            onChange={(e) => setSelectedSeverity(e.target.value)}
-          >
-            <option value="ALL">All Severities</option>
-            <option value="Critical">Critical Only</option>
-            <option value="High">High Only</option>
-            <option value="Medium">Medium Only</option>
-            <option value="Low">Low Only</option>
-          </select>
+        {/* Secondary Filter Controls */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.85rem' }}>
+          {/* Application Filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>App:</label>
+            <select
+              className="form-select"
+              style={{ width: 'auto', minWidth: '130px', padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+              value={selectedApp}
+              onChange={(e) => setSelectedApp(e.target.value)}
+            >
+              <option value="ALL">All Applications</option>
+              {appOptions.map((app) => (
+                <option key={app} value={app}>
+                  {app}
+                </option>
+              ))}
+            </select>
+          </div>
 
-          <select
-            className="form-select"
-            style={{ width: 'auto', padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
-            value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value)}
+          {/* Severity Filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Severity:</label>
+            <select
+              className="form-select"
+              style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+              value={selectedSeverity}
+              onChange={(e) => setSelectedSeverity(e.target.value)}
+            >
+              <option value="ALL">All Severities</option>
+              <option value="Critical">Critical</option>
+              <option value="High">High</option>
+              <option value="Medium">Medium</option>
+              <option value="Low">Low</option>
+            </select>
+          </div>
+
+          {/* Status Filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Status:</label>
+            <select
+              className="form-select"
+              style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="Open">Open</option>
+              <option value="Resolved">Resolved</option>
+              <option value="Suppressed">Suppressed</option>
+            </select>
+          </div>
+
+          {/* Fix / CVE Toggle */}
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              fontSize: '0.75rem',
+              color: fixOnly ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              userSelect: 'none',
+              marginLeft: '0.25rem',
+            }}
           >
-            <option value="ALL">All Statuses</option>
-            <option value="Open">Open Only</option>
-            <option value="Resolved">Resolved Only</option>
-            <option value="Suppressed">Suppressed Only</option>
-          </select>
+            <input
+              type="checkbox"
+              checked={fixOnly}
+              onChange={(e) => setFixOnly(e.target.checked)}
+              style={{ cursor: 'pointer', accentColor: 'var(--accent-cyan)' }}
+            />
+            Has CVE ID
+          </label>
+
+          {/* Sort By */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginLeft: 'auto' }}>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              <ArrowUpDown size={12} /> Sort:
+            </label>
+            <select
+              className="form-select"
+              style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+            >
+              <option value="severity">Severity</option>
+              <option value="newest">Recent</option>
+              <option value="app">Application</option>
+              <option value="tool">Scanner</option>
+            </select>
+
+            <button
+              className="btn btn-secondary"
+              onClick={() => setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
+              style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
+              title={`Toggle sort order (Current: ${sortOrder.toUpperCase()})`}
+            >
+              {sortOrder.toUpperCase()}
+            </button>
+
+            {/* Page Size */}
+            <select
+              className="form-select"
+              style={{ width: 'auto', padding: '0.35rem 0.5rem', fontSize: '0.75rem' }}
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              title="Items per page"
+            >
+              <option value={10}>10 / page</option>
+              <option value={15}>15 / page</option>
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
+          </div>
         </div>
       </div>
 
       {/* Findings Table */}
       {loading ? (
-        <div style={{ color: 'var(--text-muted)' }}>Loading findings...</div>
+        <div className="card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+          Loading findings...
+        </div>
+      ) : totalItems === 0 ? (
+        <div className="card empty-state">
+          <AlertCircle className="empty-state-icon" />
+          <div className="empty-state-title">
+            {hasActiveFilters ? 'No Matching Findings' : 'No Security Findings Detected'}
+          </div>
+          <p className="empty-state-desc">
+            {hasActiveFilters
+              ? 'No security findings match your active filters or search term. Try resetting your filters.'
+              : 'Your applications are clean! Run security-gate.ps1 in a project repository to trigger automated security scanning.'}
+          </p>
+          {hasActiveFilters && (
+            <button onClick={resetFilters} className="btn btn-primary" style={{ marginTop: '0.5rem' }}>
+              <RotateCcw size={14} /> Clear All Filters
+            </button>
+          )}
+        </div>
       ) : (
-        <div className="card">
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="table-container" style={{ marginTop: 0 }}>
             <table>
               <thead>
                 <tr>
-                  <th>Severity</th>
-                  <th>Scanner</th>
+                  <th style={{ width: '100px' }}>Severity</th>
+                  <th style={{ width: '110px' }}>Scanner</th>
                   <th>Finding & Location</th>
-                  <th>Service</th>
-                  <th>Status</th>
-                  <th>Remediation Action</th>
+                  <th style={{ width: '150px' }}>Service</th>
+                  <th style={{ width: '110px' }}>Status</th>
+                  <th style={{ width: '110px', textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredFindings.map((f) => (
+                {paginatedFindings.map((f) => (
                   <tr key={f.id}>
                     <td>
                       <SeverityBadge severity={f.severity} />
@@ -191,7 +427,7 @@ export const SecurityFindingsPage: React.FC = () => {
                       <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
                         {f.title}
                       </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.3rem', lineHeight: 1.4 }}>
                         {f.description}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -214,18 +450,20 @@ export const SecurityFindingsPage: React.FC = () => {
                       )}
                     </td>
                     <td>
-                      <span style={{ fontWeight: 600 }}>{f.applicationName}</span>
+                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{f.applicationName}</span>
                     </td>
                     <td>
-                      <span style={{
-                        fontSize: '0.75rem',
-                        fontWeight: 600,
-                        color: f.status === 'Open' ? '#ff8800' : f.status === 'Resolved' ? '#10b981' : 'var(--text-muted)'
-                      }}>
+                      <span
+                        style={{
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                          color: f.status === 'Open' ? '#ff8800' : f.status === 'Resolved' ? '#10b981' : 'var(--text-muted)',
+                        }}
+                      >
                         {f.status}
                       </span>
                     </td>
-                    <td>
+                    <td style={{ textAlign: 'right' }}>
                       <button
                         onClick={() => setTriagingFinding(f)}
                         className="btn btn-secondary"
@@ -238,6 +476,37 @@ export const SecurityFindingsPage: React.FC = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Pagination Bar */}
+          <div className="pagination-bar">
+            <div>
+              Showing <strong style={{ color: 'var(--text-primary)' }}>{startIndex + 1}</strong> to{' '}
+              <strong style={{ color: 'var(--text-primary)' }}>{Math.min(startIndex + pageSize, totalItems)}</strong> of{' '}
+              <strong style={{ color: 'var(--text-primary)' }}>{totalItems}</strong> findings
+            </div>
+
+            <div className="pagination-nav">
+              <button
+                className="pagination-btn"
+                disabled={validCurrentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft size={14} /> Prev
+              </button>
+
+              <span style={{ padding: '0 0.5rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                Page {validCurrentPage} of {totalPages}
+              </span>
+
+              <button
+                className="pagination-btn"
+                disabled={validCurrentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Next <ChevronRight size={14} />
+              </button>
+            </div>
           </div>
         </div>
       )}
