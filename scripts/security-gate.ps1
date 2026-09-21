@@ -203,8 +203,23 @@ if ($gitleaksConfig) {
     $gitleaksArgs += @("-c", "$gitleaksConfig")
 }
 
-$gitleaksProc = Start-Process -FilePath "gitleaks" -ArgumentList $gitleaksArgs -NoNewWindow -PassThru -Wait -RedirectStandardError (Join-Path $tempDir "gitleaks_err.log")
-$gitleaksExit = $gitleaksProc.ExitCode
+$hasDocker = (Get-Command "docker" -ErrorAction SilentlyContinue) -ne $null
+$gitleaksExit = 0
+
+if (Get-Command "gitleaks" -ErrorAction SilentlyContinue) {
+    $gitleaksProc = Start-Process -FilePath "gitleaks" -ArgumentList $gitleaksArgs -NoNewWindow -PassThru -Wait -RedirectStandardError (Join-Path $tempDir "gitleaks_err.log")
+    $gitleaksExit = $gitleaksProc.ExitCode
+} elseif ($hasDocker) {
+    Write-Host "  [INFO] 'gitleaks' CLI not found. Running via Docker container (zricethezav/gitleaks)..." -ForegroundColor DarkGray
+    $dockerArgs = @("run", "--rm", "-v", "${resolvedProject}:/scan", "-v", "${tempDir}:/out", "zricethezav/gitleaks:latest", "dir", "/scan", "-f", "json", "-r", "/out/gitleaks.json")
+    if ($gitleaksConfig) {
+        $dockerArgs += @("-c", "/scan/.gitleaks.toml")
+    }
+    $gitleaksProc = Start-Process -FilePath "docker" -ArgumentList $dockerArgs -NoNewWindow -PassThru -Wait -RedirectStandardError (Join-Path $tempDir "gitleaks_err.log")
+    $gitleaksExit = $gitleaksProc.ExitCode
+} else {
+    Write-Host "  [WARN] Neither Gitleaks CLI nor Docker found on system. Skipping secret scan." -ForegroundColor Yellow
+}
 
 $gitleaksCount = 0
 if (Test-Path $gitleaksJson) {
@@ -272,7 +287,15 @@ if ($scanTargets.Count -eq 0) {
 }
 
 $semgrepArgs = @("scan", "--config", "$semgrepConfig", "--json", "-o", "$semgrepJson") + $scanTargets
-$semgrepProc = Start-Process -FilePath "semgrep" -ArgumentList $semgrepArgs -NoNewWindow -PassThru -Wait -RedirectStandardError (Join-Path $tempDir "semgrep_err.log")
+if (Get-Command "semgrep" -ErrorAction SilentlyContinue) {
+    $semgrepProc = Start-Process -FilePath "semgrep" -ArgumentList $semgrepArgs -NoNewWindow -PassThru -Wait -RedirectStandardError (Join-Path $tempDir "semgrep_err.log")
+} elseif ($hasDocker) {
+    Write-Host "  [INFO] 'semgrep' CLI not found. Running via Docker container (returntocorp/semgrep)..." -ForegroundColor DarkGray
+    $dockerArgs = @("run", "--rm", "-v", "${resolvedProject}:/src", "-v", "${tempDir}:/out", "returntocorp/semgrep", "semgrep", "scan", "--config", "auto", "--json", "-o", "/out/semgrep.json", "/src")
+    $semgrepProc = Start-Process -FilePath "docker" -ArgumentList $dockerArgs -NoNewWindow -PassThru -Wait -RedirectStandardError (Join-Path $tempDir "semgrep_err.log")
+} else {
+    Write-Host "  [WARN] Neither Semgrep CLI nor Docker found on system. Skipping SAST scan." -ForegroundColor Yellow
+}
 
 $semgrepCount = 0
 if (Test-Path $semgrepJson) {
@@ -338,7 +361,15 @@ if ($trivyConfig) {
 }
 $trivyArgs += "$resolvedProject"
 
-$trivyProc = Start-Process -FilePath "trivy" -ArgumentList $trivyArgs -NoNewWindow -PassThru -Wait -RedirectStandardError (Join-Path $tempDir "trivy_err.log")
+if (Get-Command "trivy" -ErrorAction SilentlyContinue) {
+    $trivyProc = Start-Process -FilePath "trivy" -ArgumentList $trivyArgs -NoNewWindow -PassThru -Wait -RedirectStandardError (Join-Path $tempDir "trivy_err.log")
+} elseif ($hasDocker) {
+    Write-Host "  [INFO] 'trivy' CLI not found. Running via Docker container (aquasec/trivy)..." -ForegroundColor DarkGray
+    $dockerArgs = @("run", "--rm", "-v", "${resolvedProject}:/app", "-v", "${tempDir}:/out", "aquasec/trivy:latest", "fs", "--severity", "CRITICAL,HIGH", "--format", "json", "-o", "/out/trivy.json", "/app")
+    $trivyProc = Start-Process -FilePath "docker" -ArgumentList $dockerArgs -NoNewWindow -PassThru -Wait -RedirectStandardError (Join-Path $tempDir "trivy_err.log")
+} else {
+    Write-Host "  [WARN] Neither Trivy CLI nor Docker found on system. Skipping vulnerability scan." -ForegroundColor Yellow
+}
 
 $trivyCount = 0
 if (Test-Path $trivyJson) {
@@ -416,7 +447,15 @@ if ($checkovConfig) {
     $checkovArgs += @("--config-file", "$checkovConfig")
 }
 
-$checkovProc = Start-Process -FilePath "checkov" -ArgumentList $checkovArgs -NoNewWindow -PassThru -Wait -RedirectStandardError (Join-Path $tempDir "checkov_err.log")
+if (Get-Command "checkov" -ErrorAction SilentlyContinue) {
+    $checkovProc = Start-Process -FilePath "checkov" -ArgumentList $checkovArgs -NoNewWindow -PassThru -Wait -RedirectStandardError (Join-Path $tempDir "checkov_err.log")
+} elseif ($hasDocker) {
+    Write-Host "  [INFO] 'checkov' CLI not found. Running via Docker container (bridgecrew/checkov)..." -ForegroundColor DarkGray
+    $dockerArgs = @("run", "--rm", "-v", "${resolvedProject}:/tf", "-v", "${checkovOutDir}:/out", "bridgecrew/checkov:latest", "-d", "/tf", "--output", "json", "--output-file-path", "/out", "--soft-fail")
+    $checkovProc = Start-Process -FilePath "docker" -ArgumentList $dockerArgs -NoNewWindow -PassThru -Wait -RedirectStandardError (Join-Path $tempDir "checkov_err.log")
+} else {
+    Write-Host "  [WARN] Neither Checkov CLI nor Docker found on system. Skipping IaC scan." -ForegroundColor Yellow
+}
 
 $checkovCount = 0
 $checkovJson = Join-Path $checkovOutDir "results_json.json"
