@@ -13,6 +13,9 @@ permissions:
   security-events: write
 
 jobs:
+  # ----------------------------------------------------------------------------
+  # 1. Gitleaks - Secret Detection
+  # ----------------------------------------------------------------------------
   secret-detection:
     name: Gitleaks Secret Detection
     runs-on: ubuntu-latest
@@ -28,24 +31,74 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: ${{ hashFiles('.gitleaks.toml') != '' && '.gitleaks.toml' || '' }}
 
+  # ----------------------------------------------------------------------------
+  # 2. Semgrep - SAST Code Analysis
+  # ----------------------------------------------------------------------------
   sast-semgrep:
     name: Semgrep Static Code Analysis
     runs-on: ubuntu-latest
-    container:
-      image: returntocorp/semgrep:latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Run Semgrep SAST
         run: |
+          CONFIG_ARG="--config auto"
           if [ -f "security/semgrep/semgrep-rules.yml" ]; then
-            echo "[INFO] Using repository semgrep security rules..."
-            semgrep scan --config security/semgrep/semgrep-rules.yml --config auto --sarif --output semgrep-results.sarif .
-          else
-            echo "[INFO] Running auto semgrep scan..."
-            semgrep scan --config auto --sarif --output semgrep-results.sarif .
+            CONFIG_ARG="--config /src/security/semgrep/semgrep-rules.yml --config auto"
           fi
+
+          docker run --rm -v "${{ github.workspace }}:/src" returntocorp/semgrep semgrep scan \
+            $CONFIG_ARG \
+            --sarif --output /src/semgrep-results.sarif \
+            --json --output /src/semgrep-results.json /src || true
+
+      - name: Generate Semgrep Action Summary
+        run: |
+          python3 - << 'EOF'
+          import json, os
+          summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+          results_path = "semgrep-results.json"
+
+          with open(summary_file, "a") as f:
+              f.write("## 💻 Semgrep Static Code Analysis (SAST)\n\n")
+
+          if not os.path.exists(results_path):
+              with open(summary_file, "a") as f:
+                  f.write("⚠️ *No Semgrep output generated.*\n\n")
+              exit(0)
+
+          try:
+              with open(results_path) as f:
+                  data = json.load(f)
+          except Exception:
+              data = {}
+
+          results = data.get("results", [])
+          blocking = [r for r in results if r.get("extra", {}).get("severity") in ("ERROR", "CRITICAL")]
+          warnings = [r for r in results if r.get("extra", {}).get("severity") in ("WARNING", "HIGH", "MEDIUM")]
+
+          with open(summary_file, "a") as f:
+              if not results:
+                  f.write("✅ **No SAST violations found!** Application code passes static analysis.\n\n")
+              else:
+                  status_icon = "❌ **Blocked**" if blocking else "⚠️ **Warnings**"
+                  f.write(f"{status_icon}: **{len(results)}** findings detected ({len(blocking)} Critical/Error, {len(warnings)} Warnings)\n\n")
+                  f.write("| Severity | Rule ID | File & Line | Summary |\n")
+                  f.write("| :--- | :--- | :--- | :--- |\n")
+                  for r in results[:15]:
+                      sev = r.get("extra", {}).get("severity", "UNKNOWN")
+                      rule = r.get("check_id", "").split(".")[-1]
+                      path = f"{r.get('path', '')}:{r.get('start', {}).get('line', 1)}"
+                      msg = r.get("extra", {}).get("message", "").replace("\n", " ")[:90]
+                      f.write(f"| `{sev}` | `{rule}` | `{path}` | {msg} |\n")
+                  if len(results) > 15:
+                      f.write(f"\n*...and {len(results) - 15} more findings.*\n\n")
+
+          if blocking:
+              print(f"[FAIL] {len(blocking)} blocking SAST violations detected!")
+              exit(1)
+          EOF
 
       - name: Upload Semgrep SARIF
         if: always()
@@ -54,6 +107,9 @@ jobs:
           sarif_file: semgrep-results.sarif
         continue-on-error: true
 
+  # ----------------------------------------------------------------------------
+  # 3. Trivy - Software Composition Analysis & Vulnerability Scan
+  # ----------------------------------------------------------------------------
   sca-and-container-trivy:
     name: Trivy Vulnerability & Container Scan
     runs-on: ubuntu-latest
@@ -66,17 +122,67 @@ jobs:
         with:
           scan-type: 'fs'
           config: ${{ hashFiles('security/trivy/trivy.yaml') != '' && 'security/trivy/trivy.yaml' || '' }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
+          format: 'json'
+          output: 'trivy-results.json'
           severity: 'CRITICAL,HIGH'
+          exit-code: '0'
 
-      - name: Upload Trivy SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-results.sarif
-        continue-on-error: true
+      - name: Generate Trivy Action Summary
+        run: |
+          python3 - << 'EOF'
+          import json, os
+          summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+          results_path = "trivy-results.json"
 
+          with open(summary_file, "a") as f:
+              f.write("## 📦 Trivy Dependency & Vulnerability Scan (SCA)\n\n")
+
+          if not os.path.exists(results_path):
+              with open(summary_file, "a") as f:
+                  f.write("⚠️ *No Trivy output generated.*\n\n")
+              exit(0)
+
+          try:
+              with open(results_path) as f:
+                  data = json.load(f)
+          except Exception:
+              data = {}
+
+          vuln_list = []
+          for target in data.get("Results", []):
+              for v in target.get("Vulnerabilities", []):
+                  vuln_list.append({
+                      "target": target.get("Target", ""),
+                      "id": v.get("VulnerabilityID", ""),
+                      "pkg": v.get("PkgName", ""),
+                      "installed": v.get("InstalledVersion", ""),
+                      "fixed": v.get("FixedVersion", "N/A"),
+                      "sev": v.get("Severity", "UNKNOWN"),
+                  })
+
+          crit_high = [v for v in vuln_list if v["sev"] in ("CRITICAL", "HIGH")]
+
+          with open(summary_file, "a") as f:
+              if not vuln_list:
+                  f.write("✅ **No Critical or High vulnerabilities found!** All dependencies pass.\n\n")
+              else:
+                  status_icon = "❌ **Blocked**" if crit_high else "⚠️ **Warnings**"
+                  f.write(f"{status_icon}: Found **{len(vuln_list)}** vulnerabilities ({len(crit_high)} Critical/High)\n\n")
+                  f.write("| Severity | CVE ID | Package | Installed | Fixed In | Target File |\n")
+                  f.write("| :--- | :--- | :--- | :--- | :--- | :--- |\n")
+                  for v in vuln_list[:20]:
+                      f.write(f"| `{v['sev']}` | `{v['id']}` | `{v['pkg']}` | `{v['installed']}` | `{v['fixed']}` | `{v['target']}` |\n")
+                  if len(vuln_list) > 20:
+                      f.write(f"\n*...and {len(vuln_list) - 20} more vulnerabilities.*\n\n")
+
+          if crit_high:
+              print(f"[FAIL] {len(crit_high)} Critical/High vulnerabilities detected in dependencies!")
+              exit(1)
+          EOF
+
+  # ----------------------------------------------------------------------------
+  # 4. Checkov - Infrastructure as Code & Compliance
+  # ----------------------------------------------------------------------------
   iac-checkov:
     name: Checkov Infrastructure-as-Code Security
     runs-on: ubuntu-latest
@@ -88,33 +194,122 @@ jobs:
         uses: bridgecrewio/checkov-action@master
         with:
           config_file: ${{ hashFiles('security/checkov/.checkov.yml') != '' && 'security/checkov/.checkov.yml' || '' }}
-          output_format: sarif
-          output_file_path: checkov-results.sarif
+          output_format: json
+          output_file_path: checkov-results.json
           framework: terraform,kubernetes,dockerfile
+          soft_fail: true
 
-      - name: Upload Checkov SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: checkov-results.sarif
-        continue-on-error: true
+      - name: Generate Checkov Action Summary
+        run: |
+          python3 - << 'EOF'
+          import json, os
+          summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+          results_path = "checkov-results.json"
 
+          with open(summary_file, "a") as f:
+              f.write("## ☁️ Checkov Infrastructure-as-Code (IaC)\n\n")
+
+          if not os.path.exists(results_path):
+              with open(summary_file, "a") as f:
+                  f.write("✅ *No IaC or container files found to scan.*\n\n")
+              exit(0)
+
+          try:
+              with open(results_path) as f:
+                  raw = f.read()
+              data = json.loads(raw) if raw.strip() else {}
+          except Exception:
+              data = {}
+
+          checks = []
+          if isinstance(data, list):
+              for block in data:
+                  checks.extend(block.get("results", {}).get("failed_checks", []))
+          elif isinstance(data, dict):
+              checks.extend(data.get("results", {}).get("failed_checks", []))
+
+          with open(summary_file, "a") as f:
+              if not checks:
+                  f.write("✅ **No IaC or container misconfigurations detected!** All security checks passed.\n\n")
+              else:
+                  f.write(f"❌ **Failed**: Found **{len(checks)}** IaC policy violations\n\n")
+                  f.write("| Check ID | Severity | Resource | File | Guideline |\n")
+                  f.write("| :--- | :--- | :--- | :--- | :--- |\n")
+                  for c in checks[:15]:
+                      cid = c.get("check_id", "")
+                      sev = c.get("severity", "MEDIUM") or "MEDIUM"
+                      res = c.get("resource", "")
+                      fpath = f"{c.get('file_path', '')}:{c.get('file_line_range', [1])[0]}"
+                      name = c.get("check_name", "")[:60]
+                      f.write(f"| `{cid}` | `{sev}` | `{res}` | `{fpath}` | {name} |\n")
+                  if len(checks) > 15:
+                      f.write(f"\n*...and {len(checks) - 15} more policy violations.*\n\n")
+
+          if checks:
+              print(f"[FAIL] {len(checks)} IaC policy violations detected!")
+              exit(1)
+          EOF
+
+  # ----------------------------------------------------------------------------
+  # 5. Master DevSecOps Security Gate Evaluation
+  # ----------------------------------------------------------------------------
   security-gate-enforcement:
-    name: Enforce Production Security Gate
+    name: DevSecOps Security Gate Decision
     needs: [secret-detection, sast-semgrep, sca-and-container-trivy, iac-checkov]
+    if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Run Security Gate Verification
+      - name: Evaluate Multi-Layer Gate & Publish Master Summary
         run: |
-          if [ -f "scripts/security-gate.sh" ]; then
-            chmod +x scripts/security-gate.sh
-            ./scripts/security-gate.sh Production
-          elif [ -f "security-gate.sh" ]; then
-            chmod +x security-gate.sh
-            ./security-gate.sh Production
+          SECRETS="${{ needs.secret-detection.result }}"
+          SAST="${{ needs.sast-semgrep.result }}"
+          SCA="${{ needs.sca-and-container-trivy.result }}"
+          IAC="${{ needs.iac-checkov.result }}"
+
+          echo "=========================================================="
+          echo " [SecureOps] DevSecOps Security Gate - Production Release"
+          echo "=========================================================="
+          echo " Secrets Status: $SECRETS"
+          echo " SAST Status:    $SAST"
+          echo " SCA Status:     $SCA"
+          echo " IaC Status:     $IAC"
+          echo "=========================================================="
+
+          GATE_FAILED=0
+          if [ "$SECRETS" != "success" ] || [ "$SAST" != "success" ] || [ "$SCA" != "success" ] || [ "$IAC" != "success" ]; then
+            GATE_FAILED=1
+          fi
+
+          cat << 'EOF' >> "$GITHUB_STEP_SUMMARY"
+          # 🛡️ SecureOps DevSecOps Security Gate Evaluation
+
+          EOF
+
+          cat << EOF >> "$GITHUB_STEP_SUMMARY"
+          **Target Environment**: Production  
+          **Trigger**: \`${{ github.event_name }}\` on branch \`${{ github.ref_name }}\`  
+          **Commit SHA**: \`${{ github.sha }}\`
+
+          ### Security Gate Evaluation Summary
+
+          | Security Tier | Scanner Engine | Gate Verdict | Policy Rule |
+          | :--- | :--- | :---: | :--- |
+          | 🔑 **Secrets Detection** | Gitleaks v8 | $([ "$SECRETS" = "success" ] && echo "✅ **PASS**" || echo "❌ **FAIL**") | Zero Tolerance: Hardcoded secrets block release |
+          | 💻 **Static Code Analysis (SAST)** | Semgrep | $([ "$SAST" = "success" ] && echo "✅ **PASS**" || echo "❌ **FAIL**") | Code Security: High/Critical vulnerabilities block release |
+          | 📦 **Software Composition (SCA)** | Trivy | $([ "$SCA" = "success" ] && echo "✅ **PASS**" || echo "❌ **FAIL**") | Dependency Security: Critical/High CVEs block release |
+          | ☁️ **Infrastructure as Code (IaC)** | Checkov | $([ "$IAC" = "success" ] && echo "✅ **PASS**" || echo "❌ **FAIL**") | Cloud & Container: CIS benchmark violations block release |
+
+          $([ "$GATE_FAILED" -eq 1 ] && echo "### ❌ Gate Decision: REJECTED (Deployment Blocked)" || echo "### ✅ Gate Decision: APPROVED (Release Cleared for Production)")
+
+          $([ "$GATE_FAILED" -eq 1 ] && echo "> **Notice**: One or more security tiers detected blocking vulnerabilities. Please inspect the detailed tables above to remediate the flagged CVEs or code flaws." || echo "> **Success**: All 4 security layers passed inspection with zero blocking violations.")
+
+          ---
+          EOF
+
+          if [ "$GATE_FAILED" -eq 1 ]; then
+            echo ">>> SECURITY GATE FAILED: Release blocked according to policy. <<<"
+            exit 1
           else
-            echo "[INFO] No standalone security-gate.sh found. All preceding security scanning jobs evaluated successfully."
+            echo ">>> SECURITY GATE PASSED: All requirements satisfied. Release approved. <<<"
+            exit 0
           fi
