@@ -200,7 +200,56 @@ If a finding is a documented false positive or has compensating controls:
 
 ---
 
-## 4. Frequently Asked Questions & Troubleshooting
+## 4. Automated CI/CD: Setting Up GitHub Actions on Any Repository
+
+Want your other projects (like `job-seek`, `doc-appoint`, or new repositories) to automatically scan for secrets, SAST flaws, dependency CVEs, and IaC violations on every **Pull Request** and **Push** to `main` or `master` in GitHub?
+
+SecureOps provides a single automated installation command that copies the GitHub Actions workflow, all security tool configuration files, and security gate scripts into any target repository folder.
+
+### Step 1: Run the Pipeline Installer
+
+From the SecureOps root directory:
+
+**Windows PowerShell**:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-security-pipeline.ps1 -TargetPath "C:\Users\sirki\projects\job-seek"
+```
+*(If you run the script without `-TargetPath`, it will interactively prompt you for the folder location).*
+
+**Linux / macOS / Git Bash**:
+```bash
+./scripts/install-security-pipeline.sh /path/to/job-seek
+```
+
+### What It Installs into Your Repository
+The installer automatically creates all necessary folders and copies:
+1. `.github/workflows/security.yml`: Pre-configured GitHub Actions security workflow supporting both `[main, master]` branches.
+2. `.gitleaks.toml`: Enterprise secret scanning rules & entropy patterns.
+3. `security/semgrep/semgrep-rules.yml`: SAST code analysis rules.
+4. `security/trivy/trivy.yaml`: Dependency CVE and filesystem scanner configuration.
+5. `security/checkov/.checkov.yml`: Infrastructure-as-Code and Dockerfile compliance policies.
+6. `security/policies/gate-thresholds.md`: Security SLA and blocking criteria.
+7. `scripts/security-gate.ps1` & `scripts/security-gate.sh`: Local and CI gating scripts.
+
+### Step 2: Commit & Push to GitHub
+```powershell
+cd C:\Users\sirki\projects\job-seek
+git add .github security scripts .gitleaks.toml
+git commit -m "chore: add SecureOps DevSecOps security pipeline and configs"
+git push
+```
+
+### Step 3: Automated Security Scanning on PRs & Pushes
+Whenever a developer opens a Pull Request or pushes to `main` or `master`, GitHub Actions will automatically:
+- Run Gitleaks across git history for secrets.
+- Run Semgrep SAST on application source code.
+- Run Trivy on `package-lock.json` or NuGet dependencies for known CVEs.
+- Run Checkov on Dockerfiles and IaC manifests.
+- Upload security findings directly to GitHub Security (**SARIF** integration) and enforce the gate!
+
+---
+
+## 5. Frequently Asked Questions & Troubleshooting
 
 ### Q: Why did the deployment form show *"One or more validation errors occurred"*?
 **A**: The deployment engine enforces strict **Semantic Versioning** (`MAJOR.MINOR.PATCH`). 
@@ -228,7 +277,7 @@ The script will auto-register `doc-appoint` in the portal, run all 4 scanners, a
 
 ---
 
-## 5. Summary of Benefits for Your Development Teams
+## 6. Summary of Benefits for Your Development Teams
 
 | Before SecureOps | With SecureOps |
 | :--- | :--- |

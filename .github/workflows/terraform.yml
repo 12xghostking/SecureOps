@@ -2,10 +2,11 @@ name: Terraform IaC Validation
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
     paths:
       - 'infrastructure/terraform/**'
   pull_request:
+    branches: [main, master]
     paths:
       - 'infrastructure/terraform/**'
 

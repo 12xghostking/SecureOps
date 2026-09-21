@@ -2,9 +2,10 @@ name: Container Build & Hardening
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
     tags: ['v*.*.*']
   pull_request:
+    branches: [main, master]
     paths:
       - 'Dockerfile'
       - 'frontend/Dockerfile'
