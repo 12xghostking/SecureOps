@@ -2,21 +2,18 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS build
 WORKDIR /source
 
-# Copy solution and csproj files for optimal layer caching
-COPY SecureOps.slnx ./
+# Copy csproj files for layer caching
 COPY src/SecureOps.Domain/SecureOps.Domain.csproj src/SecureOps.Domain/
 COPY src/SecureOps.Application/SecureOps.Application.csproj src/SecureOps.Application/
 COPY src/SecureOps.Infrastructure/SecureOps.Infrastructure.csproj src/SecureOps.Infrastructure/
 COPY src/SecureOps.Api/SecureOps.Api.csproj src/SecureOps.Api/
-COPY tests/SecureOps.UnitTests/SecureOps.UnitTests.csproj tests/SecureOps.UnitTests/
-COPY tests/SecureOps.IntegrationTests/SecureOps.IntegrationTests.csproj tests/SecureOps.IntegrationTests/
 
 RUN dotnet restore src/SecureOps.Api/SecureOps.Api.csproj
 
 # Copy source code and publish
 COPY src/ src/
 WORKDIR /source/src/SecureOps.Api
-RUN dotnet publish -c Release -o /app/publish --no-restore
+RUN dotnet publish -c Release -o /app/publish
 
 # Hardened Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine AS runtime

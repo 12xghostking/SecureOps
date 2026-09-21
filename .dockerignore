@@ -1,0 +1,14 @@
+**/.git
+**/.github
+**/bin
+**/obj
+**/node_modules
+**/dist
+**/.vs
+**/.idea
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+TestResults/
+coverage/
