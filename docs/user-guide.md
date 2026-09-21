@@ -79,7 +79,7 @@ powershell -ExecutionPolicy Bypass -File .\security-gate.ps1 -TargetEnvironment 
 
 > **Smart Configuration Resolution**: The script automatically locates rules from the central SecureOps installation (`.gitleaks.toml`, `semgrep-rules.yml`, `trivy.yaml`, `.checkov.yml`) or falls back cleanly to engine defaults. You do **not** need to copy any config files!
 
-> **Automated Onboarding**: If the application has not been registered in the SecureOps portal yet, `security-gate.ps1` will automatically register it for you!
+> **Interactive Onboarding**: If the application has not been registered in the SecureOps portal yet, `security-gate.ps1` automatically detects your project's Git repository URL, owner email, and tech stack, and prompts you to confirm or customize the details (Press `[Enter]` to accept defaults). In CI/CD pipelines, pass `-NonInteractive` to onboard automatically without user prompts!
 
 ---
 

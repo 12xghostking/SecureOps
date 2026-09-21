@@ -23,7 +23,8 @@ param (
     [string]$TargetEnvironment = "Production",
     [string]$ApiUrl = "http://localhost:5000",
     [string]$ApplicationName = "",
-    [switch]$UploadToPortal
+    [switch]$UploadToPortal,
+    [switch]$NonInteractive
 )
 
 $ErrorActionPreference = "Continue"
@@ -74,22 +75,107 @@ if ($apiOnline) {
         $app = $apps | Where-Object { $_.name -ieq $ApplicationName }
         
         if ($null -eq $app) {
-            Write-Host "[INFO] Application '$ApplicationName' not registered yet. Auto-registering in SecureOps..." -ForegroundColor Yellow
+            Write-Host "`n[ONBOARDING] Application '$ApplicationName' is not registered in SecureOps." -ForegroundColor Yellow
+            
+            # Detect default metadata
+            $defRepo = "https://github.com/local/$ApplicationName"
+            $defEmail = "devsecops@company.internal"
+            $defLang = "Multi-language"
+            $defDesc = "Onboarded application via DevSecOps Security Gate"
+            $defTier = "Tier2_BusinessCore"
+
+            # Check Git metadata
+            try {
+                $gitUrl = git -C $resolvedProject config --get remote.origin.url 2>$null
+                if ($gitUrl -and $gitUrl.Trim() -match "^https?://") {
+                    $defRepo = $gitUrl.Trim()
+                } elseif ($gitUrl -and $gitUrl.Trim() -match "^git@github\.com:(.+)\.git$") {
+                    $defRepo = "https://github.com/" + $Matches[1]
+                }
+                
+                $gitMail = git -C $resolvedProject config --get user.email 2>$null
+                if ($gitMail -and $gitMail.Contains("@")) {
+                    $defEmail = $gitMail.Trim()
+                }
+            } catch {}
+
+            # Detect language/stack
+            if (Test-Path (Join-Path $resolvedProject "package.json")) {
+                $defLang = "TypeScript / Node.js"
+            } elseif ((Get-ChildItem -Path $resolvedProject -Filter "*.csproj" -Recurse -Depth 2 -ErrorAction SilentlyContinue).Count -gt 0) {
+                $defLang = "C# / .NET 8"
+            } elseif (Test-Path (Join-Path $resolvedProject "requirements.txt")) {
+                $defLang = "Python 3.12"
+            } elseif (Test-Path (Join-Path $resolvedProject "go.mod")) {
+                $defLang = "Go"
+            }
+
+            $finalName = $ApplicationName
+            $finalDesc = $defDesc
+            $finalRepo = $defRepo
+            $finalEmail = $defEmail
+            $finalLang = $defLang
+            $finalTier = $defTier
+
+            # Interactive prompts if user is in an interactive terminal
+            $isInteractive = (-not $NonInteractive) -and ($env:CI -ne "true") -and [Environment]::UserInteractive
+
+            if ($isInteractive) {
+                Write-Host "Please enter or confirm service details for the SecureOps Portal (Press [Enter] to accept defaults):`n" -ForegroundColor Cyan
+                
+                $inName = Read-Host "  Service Name [$ApplicationName]"
+                if ($inName -and $inName.Trim()) { $finalName = $inName.Trim() }
+
+                $inDesc = Read-Host "  Description [$defDesc]"
+                if ($inDesc -and $inDesc.Trim()) { $finalDesc = $inDesc.Trim() }
+
+                $inRepo = Read-Host "  Repository URL [$defRepo]"
+                if ($inRepo -and $inRepo.Trim()) { $finalRepo = $inRepo.Trim() }
+
+                $inEmail = Read-Host "  Owner Email [$defEmail]"
+                if ($inEmail -and $inEmail.Trim()) { $finalEmail = $inEmail.Trim() }
+
+                $inLang = Read-Host "  Language / Tech Stack [$defLang]"
+                if ($inLang -and $inLang.Trim()) { $finalLang = $inLang.Trim() }
+
+                Write-Host "  Select Application Tier:" -ForegroundColor Cyan
+                Write-Host "    [1] Tier 1: Mission Critical (Zero tolerance, 24h SLA)"
+                Write-Host "    [2] Tier 2: Business Core (Standard Production Gate - Default)"
+                Write-Host "    [3] Tier 3: Internal Utility (Non-blocking DevSecOps)"
+                $inTier = Read-Host "  Select Tier [2]"
+                switch ($inTier.Trim()) {
+                    "1" { $finalTier = "Tier1_MissionCritical" }
+                    "3" { $finalTier = "Tier3_Internal" }
+                    Default { $finalTier = "Tier2_BusinessCore" }
+                }
+                Write-Host ""
+            }
+
             $newAppPayload = @{
-                name = $ApplicationName
-                description = "Onboarded application via DevSecOps Security Gate"
-                repositoryUrl = "local://$ApplicationName"
-                ownerEmail = "devsecops@company.internal"
-                language = "Multi-language"
-                tier = "Tier2"
+                name = $finalName
+                description = $finalDesc
+                repositoryUrl = $finalRepo
+                ownerEmail = $finalEmail
+                language = $finalLang
+                tier = $finalTier
             } | ConvertTo-Json
             
-            $app = Invoke-RestMethod -Uri "$ApiUrl/api/applications" -Method Post -Body $newAppPayload -ContentType "application/json" -TimeoutSec 5
-            Write-Host "[INFO] Successfully registered application '$ApplicationName' with ID $($app.id)" -ForegroundColor Green
+            $newAppBytes = [System.Text.Encoding]::UTF8.GetBytes($newAppPayload)
+            $app = Invoke-RestMethod -Uri "$ApiUrl/api/applications" -Method Post -Body $newAppBytes -ContentType "application/json; charset=utf-8" -TimeoutSec 10
+            Write-Host "[INFO] Successfully registered application '$finalName' with ID $($app.id)" -ForegroundColor Green
+            $ApplicationName = $finalName
         }
         $targetAppId = $app.id
     } catch {
-        Write-Host "[WARN] Could not retrieve or register application in API: $_" -ForegroundColor Yellow
+        $errMsg = $_.Exception.Message
+        if ($_.Exception.Response) {
+            try {
+                $stream = $_.Exception.Response.GetResponseStream()
+                $reader = New-Object System.IO.StreamReader($stream)
+                $errMsg = $reader.ReadToEnd()
+            } catch {}
+        }
+        Write-Host "[WARN] Could not retrieve or register application in API: $errMsg" -ForegroundColor Yellow
     }
 }
 
@@ -123,7 +209,7 @@ $gitleaksExit = $gitleaksProc.ExitCode
 $gitleaksCount = 0
 if (Test-Path $gitleaksJson) {
     try {
-        $rawGitleaks = Get-Content -Raw -Path $gitleaksJson
+        $rawGitleaks = Get-Content -Raw -Encoding UTF8 -Path $gitleaksJson
         if ($rawGitleaks -and $rawGitleaks.Trim().Length -gt 2) {
             $parsedLeaks = $rawGitleaks | ConvertFrom-Json
             if ($parsedLeaks) {
@@ -191,7 +277,7 @@ $semgrepProc = Start-Process -FilePath "semgrep" -ArgumentList $semgrepArgs -NoN
 $semgrepCount = 0
 if (Test-Path $semgrepJson) {
     try {
-        $rawSemgrep = Get-Content -Raw -Path $semgrepJson
+        $rawSemgrep = Get-Content -Raw -Encoding UTF8 -Path $semgrepJson
         if ($rawSemgrep) {
             $parsedSemgrep = $rawSemgrep | ConvertFrom-Json
             if ($parsedSemgrep.results) {
@@ -257,7 +343,7 @@ $trivyProc = Start-Process -FilePath "trivy" -ArgumentList $trivyArgs -NoNewWind
 $trivyCount = 0
 if (Test-Path $trivyJson) {
     try {
-        $rawTrivy = Get-Content -Raw -Path $trivyJson
+        $rawTrivy = Get-Content -Raw -Encoding UTF8 -Path $trivyJson
         if ($rawTrivy) {
             $parsedTrivy = $rawTrivy | ConvertFrom-Json
             if ($parsedTrivy.Results) {
@@ -336,7 +422,7 @@ $checkovCount = 0
 $checkovJson = Join-Path $checkovOutDir "results_json.json"
 if (Test-Path $checkovJson) {
     try {
-        $rawCheckov = Get-Content -Raw -Path $checkovJson
+        $rawCheckov = Get-Content -Raw -Encoding UTF8 -Path $checkovJson
         if ($rawCheckov) {
             $parsedCheckov = $rawCheckov | ConvertFrom-Json
             $failedChecks = @()
@@ -396,11 +482,20 @@ if ($apiOnline -and $targetAppId -and $findingsToIngest.Count -gt 0) {
     Write-Host "`n--> [Ingestion] Uploading $($findingsToIngest.Count) findings to SecureOps Portal..." -ForegroundColor Cyan
     try {
         $ingestPayload = $findingsToIngest | ConvertTo-Json -Depth 6
-        $ingestResp = Invoke-RestMethod -Uri "$ApiUrl/api/security/findings/ingest-batch" -Method Post -Body $ingestPayload -ContentType "application/json" -TimeoutSec 15
+        $utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($ingestPayload)
+        $ingestResp = Invoke-RestMethod -Uri "$ApiUrl/api/security/findings/ingest-batch" -Method Post -Body $utf8Bytes -ContentType "application/json; charset=utf-8" -TimeoutSec 30
         Write-Host "  [SUCCESS] Uploaded $($ingestResp.Count) security findings to SecureOps Portal!" -ForegroundColor Green
         Write-Host "  [PORTAL]  View real-time dashboard: http://localhost:3000" -ForegroundColor Cyan
     } catch {
-        Write-Host "  [ERROR] Ingestion failed: $_" -ForegroundColor Red
+        $errMsg = $_.Exception.Message
+        if ($_.Exception.Response) {
+            try {
+                $stream = $_.Exception.Response.GetResponseStream()
+                $reader = New-Object System.IO.StreamReader($stream)
+                $errMsg = $reader.ReadToEnd()
+            } catch {}
+        }
+        Write-Host "  [ERROR] Ingestion failed: $errMsg" -ForegroundColor Red
     }
 } elseif ($apiOnline -and $findingsToIngest.Count -eq 0) {
     Write-Host "`n--> [Ingestion] 0 findings detected. Portal remains clean and Healthy!" -ForegroundColor Green
