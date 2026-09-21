@@ -238,6 +238,7 @@ Modules include:
 
 ## 9. Architecture Decision Records (ADRs) & Documentation
 
+- [**User Guide: Running SecureOps in Your Projects**](docs/user-guide.md)
 - [ADR-001: Zero-Friction Dual-Mode Execution Architecture](docs/adr/ADR-001-dual-mode-execution.md)
 - [ADR-002: Multi-Layer Security Gating & Shift-Left DevSecOps](docs/adr/ADR-002-multi-layer-security-gating.md)
 - [ADR-003: Zero-Secret CI/CD via OIDC Workload Identity](docs/adr/ADR-003-oidc-workload-identity.md)
