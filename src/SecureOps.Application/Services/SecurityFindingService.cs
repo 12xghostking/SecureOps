@@ -171,4 +171,109 @@ public class SecurityFindingService : ISecurityFindingService
             FindingsByScanType = findings.GroupBy(f => f.ScanType.ToString()).ToDictionary(g => g.Key, g => g.Count())
         };
     }
+
+    public async Task<SecurityFindingDto> IngestAsync(IngestFindingRequest request, CancellationToken ct = default)
+    {
+        var app = await _context.Applications.FirstOrDefaultAsync(a => a.Id == request.ApplicationId, ct)
+            ?? throw new KeyNotFoundException($"Application {request.ApplicationId} not found.");
+
+        var ruleId = request.RuleId ?? string.Empty;
+        var filePath = request.FilePath ?? string.Empty;
+
+        var existing = await _context.SecurityFindings
+            .FirstOrDefaultAsync(f => f.ApplicationId == app.Id
+                && f.RuleId == ruleId
+                && f.FilePath == filePath
+                && f.Status == FindingStatus.Open, ct);
+
+        if (existing != null)
+        {
+            existing.Title = request.Title;
+            existing.Description = request.Description ?? existing.Description;
+            existing.Severity = request.Severity;
+            existing.ScanType = request.ScanType;
+            existing.Tool = request.Tool;
+            existing.LineNumber = request.LineNumber;
+            existing.CveId = request.CveId;
+            existing.FixAvailable = request.FixAvailable;
+            existing.RemediationGuidance = request.RemediationGuidance;
+            await _context.SaveChangesAsync(ct);
+
+            return new SecurityFindingDto
+            {
+                Id = existing.Id,
+                ApplicationId = existing.ApplicationId,
+                ApplicationName = app.Name,
+                Title = existing.Title,
+                Description = existing.Description,
+                Severity = existing.Severity,
+                ScanType = existing.ScanType,
+                Tool = existing.Tool,
+                Status = existing.Status,
+                FilePath = existing.FilePath,
+                LineNumber = existing.LineNumber,
+                RuleId = existing.RuleId,
+                CveId = existing.CveId,
+                FixAvailable = existing.FixAvailable,
+                RemediationGuidance = existing.RemediationGuidance,
+                FirstDetected = existing.FirstDetected,
+                ResolvedAt = existing.ResolvedAt,
+                TriagedBy = existing.TriagedBy,
+                TriageNotes = existing.TriageNotes
+            };
+        }
+
+        var finding = new SecurityFindingEntity
+        {
+            ApplicationId = app.Id,
+            Title = request.Title,
+            Description = request.Description ?? string.Empty,
+            Severity = request.Severity,
+            ScanType = request.ScanType,
+            Tool = request.Tool,
+            Status = FindingStatus.Open,
+            FilePath = filePath,
+            LineNumber = request.LineNumber,
+            RuleId = ruleId,
+            CveId = request.CveId,
+            FixAvailable = request.FixAvailable,
+            RemediationGuidance = request.RemediationGuidance,
+            FirstDetected = DateTimeOffset.UtcNow
+        };
+
+        _context.SecurityFindings.Add(finding);
+        await _context.SaveChangesAsync(ct);
+
+        return new SecurityFindingDto
+        {
+            Id = finding.Id,
+            ApplicationId = finding.ApplicationId,
+            ApplicationName = app.Name,
+            Title = finding.Title,
+            Description = finding.Description,
+            Severity = finding.Severity,
+            ScanType = finding.ScanType,
+            Tool = finding.Tool,
+            Status = finding.Status,
+            FilePath = finding.FilePath,
+            LineNumber = finding.LineNumber,
+            RuleId = finding.RuleId,
+            CveId = finding.CveId,
+            FixAvailable = finding.FixAvailable,
+            RemediationGuidance = finding.RemediationGuidance,
+            FirstDetected = finding.FirstDetected
+        };
+    }
+
+    public async Task<List<SecurityFindingDto>> IngestBatchAsync(List<IngestFindingRequest> requests, CancellationToken ct = default)
+    {
+        var results = new List<SecurityFindingDto>();
+        foreach (var req in requests)
+        {
+            var dto = await IngestAsync(req, ct);
+            results.Add(dto);
+        }
+        return results;
+    }
 }
+

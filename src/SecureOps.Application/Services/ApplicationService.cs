@@ -38,7 +38,7 @@ public class ApplicationService : IApplicationService
             CreatedAt = a.CreatedAt,
             ActiveDeploymentsCount = a.Deployments.Count(d => d.Status == DeploymentStatus.Succeeded),
             OpenVulnerabilitiesCount = a.SecurityFindings.Count(f => f.Status == FindingStatus.Open),
-            HealthStatus = a.SecurityFindings.Any(f => f.Status == FindingStatus.Open && f.Severity == SeverityLevel.Critical)
+            HealthStatus = a.SecurityFindings.Any(f => f.Status == FindingStatus.Open && (f.Severity == SeverityLevel.Critical || f.Severity == SeverityLevel.High))
                 ? "Degraded"
                 : "Healthy"
         }).ToList();
@@ -68,7 +68,7 @@ public class ApplicationService : IApplicationService
             CreatedAt = app.CreatedAt,
             ActiveDeploymentsCount = app.Deployments.Count(d => d.Status == DeploymentStatus.Succeeded),
             OpenVulnerabilitiesCount = app.SecurityFindings.Count(f => f.Status == FindingStatus.Open),
-            HealthStatus = app.SecurityFindings.Any(f => f.Status == FindingStatus.Open && f.Severity == SeverityLevel.Critical)
+            HealthStatus = app.SecurityFindings.Any(f => f.Status == FindingStatus.Open && (f.Severity == SeverityLevel.Critical || f.Severity == SeverityLevel.High))
                 ? "Degraded"
                 : "Healthy",
             RecentDeployments = app.Deployments

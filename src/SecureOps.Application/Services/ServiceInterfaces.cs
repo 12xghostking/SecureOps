@@ -24,6 +24,8 @@ public interface ISecurityFindingService
     Task<SecurityFindingDto?> GetByIdAsync(Guid id, CancellationToken ct = default);
     Task<SecurityFindingDto> TriageAsync(Guid id, TriageFindingRequest request, CancellationToken ct = default);
     Task<SecuritySummaryDto> GetSummaryAsync(CancellationToken ct = default);
+    Task<SecurityFindingDto> IngestAsync(IngestFindingRequest request, CancellationToken ct = default);
+    Task<List<SecurityFindingDto>> IngestBatchAsync(List<IngestFindingRequest> requests, CancellationToken ct = default);
 }
 
 public interface IPipelineService

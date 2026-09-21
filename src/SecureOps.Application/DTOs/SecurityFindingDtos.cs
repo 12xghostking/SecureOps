@@ -46,3 +46,20 @@ public class SecuritySummaryDto
     public Dictionary<string, int> FindingsByTool { get; set; } = new();
     public Dictionary<string, int> FindingsByScanType { get; set; } = new();
 }
+
+public class IngestFindingRequest
+{
+    public Guid ApplicationId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public SeverityLevel Severity { get; set; }
+    public ScanType ScanType { get; set; }
+    public string Tool { get; set; } = string.Empty;
+    public string? FilePath { get; set; }
+    public int? LineNumber { get; set; }
+    public string? RuleId { get; set; }
+    public string? CveId { get; set; }
+    public bool FixAvailable { get; set; }
+    public string? RemediationGuidance { get; set; }
+}
+

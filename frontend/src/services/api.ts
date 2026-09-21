@@ -27,7 +27,13 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     let errorDetail = 'API Request failed';
     try {
       const errJson = await res.json();
-      errorDetail = errJson.detail || errJson.title || JSON.stringify(errJson);
+      if (errJson.errors && typeof errJson.errors === 'object') {
+        errorDetail = Object.entries(errJson.errors)
+          .map(([field, msgs]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`)
+          .join(' | ');
+      } else {
+        errorDetail = errJson.detail || errJson.title || JSON.stringify(errJson);
+      }
     } catch {
       errorDetail = res.statusText;
     }

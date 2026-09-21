@@ -68,4 +68,23 @@ public class SecurityFindingsController : ControllerBase
         var summary = await _findingService.GetSummaryAsync(ct);
         return Ok(summary);
     }
+
+    [HttpPost("findings/ingest")]
+    [ProducesResponseType(typeof(SecurityFindingDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Ingest([FromBody] IngestFindingRequest request, CancellationToken ct)
+    {
+        var finding = await _findingService.IngestAsync(request, ct);
+        return CreatedAtAction(nameof(GetById), new { id = finding.Id }, finding);
+    }
+
+    [HttpPost("findings/ingest-batch")]
+    [ProducesResponseType(typeof(List<SecurityFindingDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> IngestBatch([FromBody] List<IngestFindingRequest> requests, CancellationToken ct)
+    {
+        var findings = await _findingService.IngestBatchAsync(requests, ct);
+        return Ok(findings);
+    }
 }
