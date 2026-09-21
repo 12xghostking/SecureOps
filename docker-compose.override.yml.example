@@ -1,0 +1,16 @@
+# Copy this file to docker-compose.override.yml to customize your local development setup
+version: '3.8'
+
+services:
+  secureops-api:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Logging__LogLevel__Default=Debug
+    # Mount source code for live debugging if needed:
+    # volumes:
+    #   - ./src:/source/src
+
+  secureops-web:
+    # Expose additional dev ports if needed:
+    # ports:
+    #   - "3001:8080"

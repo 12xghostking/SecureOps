@@ -1,0 +1,37 @@
+# Build and output artifacts
+**/bin/
+**/obj/
+**/dist/
+**/out/
+
+# Node dependencies
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Databases and local dev files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# IDE and OS files
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.DS_Store
+Thumbs.db
+
+# Docker compose overrides & volumes
+docker-compose.override.yml
+.env.local
+
+# Test & coverage results
+TestResults/
+coverage/
+*.cobertura.xml

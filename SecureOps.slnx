@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SecureOps.Api/SecureOps.Api.csproj" />
+    <Project Path="src/SecureOps.Application/SecureOps.Application.csproj" />
+    <Project Path="src/SecureOps.Domain/SecureOps.Domain.csproj" />
+    <Project Path="src/SecureOps.Infrastructure/SecureOps.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SecureOps.IntegrationTests/SecureOps.IntegrationTests.csproj" />
+    <Project Path="tests/SecureOps.UnitTests/SecureOps.UnitTests.csproj" />
+  </Folder>
+</Solution>
