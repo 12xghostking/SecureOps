@@ -66,14 +66,14 @@ You have two convenient ways to scan any project on your computer:
 #### Option A: Run from the SecureOps directory (No copying needed!)
 Specify the `-ProjectPath` argument pointing to your project:
 ```powershell
-cd c:\Users\sirki\projects\SecureOps
-powershell -ExecutionPolicy Bypass -File .\scripts\security-gate.ps1 -ProjectPath "c:\Users\sirki\projects\job-seek" -TargetEnvironment Production
+cd ./SecureOps
+powershell -ExecutionPolicy Bypass -File .\scripts\security-gate.ps1 -ProjectPath "\job-seek" -TargetEnvironment Production
 ```
 
 #### Option B: Run directly from inside your project folder
 You can copy `security-gate.ps1` into your project folder and run it:
 ```powershell
-cd c:\Users\sirki\projects\job-seek
+cd./job-seek
 powershell -ExecutionPolicy Bypass -File .\security-gate.ps1 -TargetEnvironment Production
 ```
 
@@ -98,12 +98,12 @@ When the script runs, it evaluates four security tiers:
 
 ### Step 4: Real-World Example: What Happened on `job-seek`
 
-When we ran `security-gate.ps1` on `c:\Users\sirki\projects\job-seek`:
+When we ran `security-gate.ps1` on `https://github.com/12xghostking/job-seek`:
 
 ```text
 ==========================================================
  [SecureOps] DevSecOps Security Gate & Portal Ingestion
-  Project:     C:\Users\sirki\projects\job-seek (job-seek)
+  Project:     job-seek (job-seek)
   Environment: Production
   API Backend: http://localhost:5000
 ==========================================================
@@ -215,8 +215,8 @@ The web portal now clearly displays field-specific error messages if an invalid 
 ### Q: Can I scan another project like `doc-appoint`?
 **A**: Yes! Simply run:
 ```powershell
-cd c:\Users\sirki\projects\SecureOps
-powershell -ExecutionPolicy Bypass -File .\scripts\security-gate.ps1 -ProjectPath "c:\Users\sirki\projects\doc-appoint"
+cd ./SecureOps
+powershell -ExecutionPolicy Bypass -File .\scripts\security-gate.ps1 -ProjectPath "./doc-appoint"
 ```
 The script will auto-register `doc-appoint` in the portal, run all 4 scanners, and upload the results to `http://localhost:3000`.
 
